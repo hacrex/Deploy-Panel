@@ -6,7 +6,7 @@
 # For production, run the agent as a systemd service (deploy/systemd/dp-agent.service)
 # instead of a container, so it is not an extra image holding that access.
 
-FROM golang:1.24-bookworm AS build
+FROM golang:1.25-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
