@@ -1,0 +1,43 @@
+[Unit]
+Description=DeployPanel control plane (dpd)
+Documentation=https://github.com/OWNER/deploypanel/blob/main/docs/CONFIG.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=deploypanel
+Group=deploypanel
+EnvironmentFile=/etc/deploypanel/dpd.env
+ExecStart=/usr/local/bin/dpd
+Restart=on-failure
+RestartSec=3
+
+# State directory: /var/lib/deploypanel, owned by the service user
+StateDirectory=deploypanel
+StateDirectoryMode=0750
+
+# Sandboxing. dpd needs the network and its state directory, nothing else.
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

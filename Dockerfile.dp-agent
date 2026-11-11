@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+# Node agent image, for development and testing. Build from the repository root:
+#   docker build -f deploy/docker/Dockerfile.dp-agent -t deploypanel/dp-agent .
+#
+# WARNING: the agent needs the Docker socket, which is equivalent to root on the host.
+# For production, run the agent as a systemd service (deploy/systemd/dp-agent.service)
+# instead of a container, so it is not an extra image holding that access.
+
+FROM golang:1.24-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=0.0.0-dev
+RUN CGO_ENABLED=0 go build -trimpath \
+      -ldflags "-s -w -X main.version=${VERSION}" \
+      -o /out/dp-agent ./cmd/dp-agent
+
+FROM gcr.io/distroless/static-debian12
+COPY --from=build /out/dp-agent /usr/local/bin/dp-agent
+ENTRYPOINT ["/usr/local/bin/dp-agent"]

@@ -1,0 +1,29 @@
+# syntax=docker/dockerfile:1
+# Control plane image. Build from the repository root:
+#   docker build -f deploy/docker/Dockerfile.dpd -t deploypanel/dpd .
+#
+# dpd uses the mattn/go-sqlite3 driver, which needs CGO, so the final image is
+# a glibc base (distroless/base), not distroless/static.
+
+FROM golang:1.24-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG VERSION=0.0.0-dev
+RUN CGO_ENABLED=1 go build -trimpath \
+      -ldflags "-s -w -X main.version=${VERSION}" \
+      -o /out/dpd ./cmd/dpd
+RUN mkdir /data && chown 65532:65532 /data
+
+FROM gcr.io/distroless/base-debian12:nonroot
+COPY --from=build /out/dpd /usr/local/bin/dpd
+COPY --from=build --chown=65532:65532 /data /data
+ENV DP_DB_PATH=/data/dpd.db
+VOLUME /data
+USER nonroot
+EXPOSE 8080
+# Inside a container dpd must listen on all interfaces, which needs
+# DP_LISTEN=0.0.0.0:8080 and DP_ALLOW_PUBLIC_LISTEN=true. Set them at run time and
+# publish the port on the host loopback only (-p 127.0.0.1:8080:8080).
+ENTRYPOINT ["/usr/local/bin/dpd"]

@@ -1,0 +1,37 @@
+[Unit]
+Description=DeployPanel node agent (dp-agent)
+Documentation=https://github.com/OWNER/deploypanel/blob/main/docs/CONFIG.md
+After=network-online.target docker.service
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=simple
+User=dp-agent
+Group=dp-agent
+# Membership of the docker group is equivalent to root on this host. The agent is the
+# only DeployPanel component that has it; hosted workloads never get the Docker socket.
+SupplementaryGroups=docker
+EnvironmentFile=/etc/deploypanel/agent.env
+ExecStart=/usr/local/bin/dp-agent --server ${DP_SERVER} --enroll-token ${DP_ENROLL_TOKEN}
+Restart=on-failure
+RestartSec=3
+
+StateDirectory=deploypanel-agent
+StateDirectoryMode=0700
+
+# The agent makes outbound connections only. It opens no listening port.
+NoNewPrivileges=true
+ProtectSystem=full
+ProtectHome=true
+PrivateTmp=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

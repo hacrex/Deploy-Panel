@@ -1,0 +1,81 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: |
+          out="$(gofmt -l .)"
+          if [ -n "$out" ]; then echo "needs gofmt:"; echo "$out"; exit 1; fi
+      - run: go vet ./...
+      - run: go test -race ./...
+      - run: go build ./...
+
+  vuln:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go install golang.org/x/vuln/cmd/govulncheck@v1.1.4
+      - run: govulncheck ./...
+
+  schema-and-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pyyaml
+      - run: python3 scripts/schema_check.py
+      - run: python3 scripts/api_check.py
+
+  proto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: bufbuild/buf-action@v1
+        with:
+          lint: true
+          format: true
+          breaking: false
+
+  shell:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: shellcheck deploy/install.sh
+      - name: systemd units
+        run: |
+          for u in deploy/systemd/*.service; do
+            sed 's|^ExecStart=.*|ExecStart=/bin/true|' "$u" > "/tmp/$(basename "$u")"
+          done
+          systemd-analyze verify --man=no /tmp/dpd.service /tmp/dp-agent.service || true
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f deploy/docker/Dockerfile.dpd -t deploypanel/dpd:ci .
+      - run: docker build -f deploy/docker/Dockerfile.dp-agent -t deploypanel/dp-agent:ci .

@@ -1,0 +1,515 @@
+openapi: 3.0.3
+info:
+  title: DeployPanel API
+  version: 0.0.0-draft
+  description: |
+    Draft API for the DeployPanel control plane (`dpd`). The UI, `dpctl`, webhooks and the
+    planned Terraform provider all use this API. Only `GET /healthz` is implemented today.
+
+    Conventions:
+    - IDs are ULIDs (26 characters, sortable by creation time).
+    - Timestamps are RFC 3339 in UTC.
+    - Lists use cursor pagination (`limit`, `cursor`) and return `next_cursor`.
+    - Errors use the `Error` schema with a stable machine-readable `code`.
+    - Secrets are write-only: they are never returned after being set.
+servers:
+  - url: http://127.0.0.1:8080
+    description: Default loopback listener. Expose through the proxy with TLS.
+security:
+  - bearerAuth: []
+  - cookieAuth: []
+tags:
+  - name: system
+  - name: auth
+  - name: sites
+  - name: deployments
+  - name: observability
+  - name: nodes
+paths:
+  /healthz:
+    get:
+      tags: [system]
+      operationId: getHealth
+      summary: Liveness and database check
+      security: []
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+        '503':
+          description: Database unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Health' }
+  /v1/auth/login:
+    post:
+      tags: [auth]
+      operationId: login
+      summary: Start a session
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Session cookie set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '401': { $ref: '#/components/responses/Error' }
+        '429': { $ref: '#/components/responses/Error' }
+  /v1/auth/logout:
+    post:
+      tags: [auth]
+      operationId: logout
+      summary: End the current session
+      responses:
+        '204': { description: Logged out }
+  /v1/me:
+    get:
+      tags: [auth]
+      operationId: getMe
+      summary: Current user and memberships
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Me' }
+        '401': { $ref: '#/components/responses/Error' }
+  /v1/sites:
+    get:
+      tags: [sites]
+      operationId: listSites
+      summary: List Sites visible to the caller
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+        - name: type
+          in: query
+          schema: { $ref: '#/components/schemas/SiteType' }
+        - name: state
+          in: query
+          schema: { $ref: '#/components/schemas/SiteState' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SiteList' }
+    post:
+      tags: [sites]
+      operationId: createSite
+      summary: Create a Site
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SiteCreate' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Site' }
+        '400': { $ref: '#/components/responses/Error' }
+        '409': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+  /v1/sites/{siteId}:
+    parameters:
+      - { $ref: '#/components/parameters/SiteId' }
+    get:
+      tags: [sites]
+      operationId: getSite
+      summary: Get a Site
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Site' }
+        '404': { $ref: '#/components/responses/Error' }
+    patch:
+      tags: [sites]
+      operationId: updateSite
+      summary: Change name, spec, limits or desired state
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SiteUpdate' }
+      responses:
+        '200':
+          description: Updated, spec_revision bumped when the spec changed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Site' }
+        '404': { $ref: '#/components/responses/Error' }
+        '422': { $ref: '#/components/responses/Error' }
+    delete:
+      tags: [sites]
+      operationId: deleteSite
+      summary: Soft delete a Site
+      responses:
+        '202': { description: Deletion started }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/sites/{siteId}/deployments:
+    parameters:
+      - { $ref: '#/components/parameters/SiteId' }
+    get:
+      tags: [deployments]
+      operationId: listDeployments
+      summary: Deployment history, newest first
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeploymentList' }
+    post:
+      tags: [deployments]
+      operationId: createDeployment
+      summary: Trigger a deployment
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeploymentCreate' }
+      responses:
+        '202':
+          description: Queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Deployment' }
+  /v1/sites/{siteId}/deployments/{revision}/rollback:
+    parameters:
+      - { $ref: '#/components/parameters/SiteId' }
+      - name: revision
+        in: path
+        required: true
+        schema: { type: integer, minimum: 1 }
+    post:
+      tags: [deployments]
+      operationId: rollbackDeployment
+      summary: Promote an earlier revision without rebuilding
+      responses:
+        '202':
+          description: Rollback queued
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Deployment' }
+        '404': { $ref: '#/components/responses/Error' }
+  /v1/sites/{siteId}/logs:
+    parameters:
+      - { $ref: '#/components/parameters/SiteId' }
+    get:
+      tags: [observability]
+      operationId: streamLogs
+      summary: Stream logs as server-sent events
+      parameters:
+        - name: follow
+          in: query
+          schema: { type: boolean, default: true }
+        - name: tail
+          in: query
+          schema: { type: integer, minimum: 0, default: 200 }
+        - name: q
+          in: query
+          description: Substring filter
+          schema: { type: string }
+      responses:
+        '200':
+          description: One `log` event per line
+          content:
+            text/event-stream:
+              schema: { type: string }
+  /v1/sites/{siteId}/incidents:
+    parameters:
+      - { $ref: '#/components/parameters/SiteId' }
+    get:
+      tags: [observability]
+      operationId: listIncidents
+      summary: Crash snapshots for a Site
+      parameters:
+        - { $ref: '#/components/parameters/Limit' }
+        - { $ref: '#/components/parameters/Cursor' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/IncidentList' }
+  /v1/nodes:
+    get:
+      tags: [nodes]
+      operationId: listNodes
+      summary: List nodes
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NodeList' }
+  /v1/nodes/enrollment-tokens:
+    post:
+      tags: [nodes]
+      operationId: createEnrollmentToken
+      summary: Create a one-time token for enrolling an agent
+      responses:
+        '201':
+          description: The token is shown once
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EnrollmentToken' }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API token
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: dp_session
+  parameters:
+    SiteId:
+      name: siteId
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/Id' }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+    Cursor:
+      name: cursor
+      in: query
+      schema: { type: string }
+  responses:
+    Error:
+      description: Error
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+  schemas:
+    Id:
+      type: string
+      pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+      example: 01JC2Z5K8X3A7M9Q4T6V1W2YBD
+    Timestamp:
+      type: string
+      format: date-time
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stable identifier, for example `site.invalid_spec`
+        message: { type: string }
+        details:
+          type: object
+          additionalProperties: true
+    Health:
+      type: object
+      required: [status, version]
+      properties:
+        status: { type: string, example: ok }
+        version: { type: string }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+        totp: { type: string, description: One-time code when 2FA is enabled }
+    Me:
+      type: object
+      required: [id, email, memberships]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        email: { type: string, format: email }
+        memberships:
+          type: array
+          items:
+            type: object
+            required: [team_id, role]
+            properties:
+              team_id: { $ref: '#/components/schemas/Id' }
+              role:
+                type: string
+                enum: [owner, admin, developer, viewer, billing]
+    SiteType:
+      type: string
+      enum: [container, compose, php, wordpress, node, python, static, proxy]
+    SiteState:
+      type: string
+      enum: [draft, provisioning, running, stopped, degraded, failed, suspended, deleting, deleted]
+    DesiredState:
+      type: string
+      enum: [running, stopped, deleted]
+    Limits:
+      type: object
+      properties:
+        cpu_milli: { type: integer, minimum: 0 }
+        mem_mb: { type: integer, minimum: 0 }
+        pids: { type: integer, minimum: 0 }
+        disk_mb: { type: integer, minimum: 0 }
+        io_weight: { type: integer, minimum: 0 }
+    Site:
+      type: object
+      required: [id, team_id, slug, name, type, state, desired_state, spec, spec_revision, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        team_id: { $ref: '#/components/schemas/Id' }
+        node_id: { $ref: '#/components/schemas/Id' }
+        parent_site_id: { $ref: '#/components/schemas/Id' }
+        slug: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/SiteType' }
+        state: { $ref: '#/components/schemas/SiteState' }
+        desired_state: { $ref: '#/components/schemas/DesiredState' }
+        spec:
+          type: object
+          description: Shape depends on `type`, see docs/SITE_DATA_MODEL.md section 3
+          additionalProperties: true
+        spec_revision: { type: integer, minimum: 1 }
+        limits: { $ref: '#/components/schemas/Limits' }
+        domains:
+          type: array
+          items: { type: string }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+        updated_at: { $ref: '#/components/schemas/Timestamp' }
+    SiteCreate:
+      type: object
+      required: [slug, name, type, spec]
+      properties:
+        team_id: { $ref: '#/components/schemas/Id' }
+        node_id: { $ref: '#/components/schemas/Id' }
+        slug: { type: string, pattern: '^[a-z0-9][a-z0-9-]{0,62}$' }
+        name: { type: string }
+        type: { $ref: '#/components/schemas/SiteType' }
+        spec: { type: object, additionalProperties: true }
+        limits: { $ref: '#/components/schemas/Limits' }
+        domains:
+          type: array
+          items: { type: string }
+        env:
+          type: object
+          additionalProperties: { type: string }
+          description: Plain environment variables
+        secrets:
+          type: object
+          additionalProperties: { type: string }
+          description: Write-only. Stored encrypted, never returned.
+    SiteUpdate:
+      type: object
+      properties:
+        name: { type: string }
+        spec: { type: object, additionalProperties: true }
+        limits: { $ref: '#/components/schemas/Limits' }
+        desired_state: { $ref: '#/components/schemas/DesiredState' }
+    SiteList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Site' }
+        next_cursor: { type: string }
+    DeploymentStatus:
+      type: string
+      enum: [queued, building, starting, live, superseded, failed, rolled_back]
+    Deployment:
+      type: object
+      required: [id, site_id, revision, status, created_at]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        site_id: { $ref: '#/components/schemas/Id' }
+        revision: { type: integer }
+        source_kind:
+          type: string
+          enum: [git, image, dockerfile, compose, archive, buildpack, push, template]
+        source_ref: { type: string }
+        image: { type: string }
+        status: { $ref: '#/components/schemas/DeploymentStatus' }
+        triggered_by: { type: string }
+        started_at: { $ref: '#/components/schemas/Timestamp' }
+        finished_at: { $ref: '#/components/schemas/Timestamp' }
+        created_at: { $ref: '#/components/schemas/Timestamp' }
+    DeploymentCreate:
+      type: object
+      properties:
+        source_kind:
+          type: string
+          enum: [git, image, dockerfile, compose, archive, buildpack, push, template]
+        source_ref: { type: string }
+    DeploymentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Deployment' }
+        next_cursor: { type: string }
+    Incident:
+      type: object
+      required: [id, site_id, kind, at]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        site_id: { $ref: '#/components/schemas/Id' }
+        node_id: { $ref: '#/components/schemas/Id' }
+        container: { type: string }
+        kind:
+          type: string
+          enum: [crash, oom, unhealthy, restart_loop]
+        exit_code: { type: integer }
+        oom_killed: { type: boolean }
+        restart_count: { type: integer }
+        last_logs:
+          type: array
+          items: { type: string }
+        last_stats:
+          type: array
+          items: { type: object, additionalProperties: true }
+        at: { $ref: '#/components/schemas/Timestamp' }
+    IncidentList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Incident' }
+        next_cursor: { type: string }
+    Node:
+      type: object
+      required: [id, name, status]
+      properties:
+        id: { $ref: '#/components/schemas/Id' }
+        name: { type: string }
+        status:
+          type: string
+          enum: [pending, online, offline, draining]
+        public_ip: { type: string }
+        arch: { type: string }
+        agent_version: { type: string }
+        last_seen_at: { $ref: '#/components/schemas/Timestamp' }
+    NodeList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: '#/components/schemas/Node' }
+    EnrollmentToken:
+      type: object
+      required: [token, expires_at]
+      properties:
+        token: { type: string, description: Shown once }
+        expires_at: { $ref: '#/components/schemas/Timestamp' }

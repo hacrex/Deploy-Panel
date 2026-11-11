@@ -1,0 +1,39 @@
+# Development stack. From the repository root:
+#   docker compose -f deploy/docker/docker-compose.dev.yml up --build
+#
+# Ports are published on the host loopback only, matching the secure default.
+# The agent is a stub today, so it only starts with:  --profile agent
+name: deploypanel-dev
+
+services:
+  dpd:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.dpd
+    environment:
+      DP_LISTEN: 0.0.0.0:8080
+      DP_ALLOW_PUBLIC_LISTEN: "true"   # required inside a container; the host port below is loopback only
+      DP_AGENT_LISTEN: 0.0.0.0:8443
+      DP_LOG_LEVEL: debug
+      # DP_SECRET_KEY_FILE: /run/secrets/dp_secret_key   # see docs/CONFIG.md
+    ports:
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8443:8443"
+    volumes:
+      - dpd-data:/data
+    restart: unless-stopped
+
+  dp-agent:
+    profiles: ["agent"]
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile.dp-agent
+    command: ["--server", "dpd:8443"]
+    depends_on:
+      - dpd
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock   # dev only, see the warning in Dockerfile.dp-agent
+    restart: unless-stopped
+
+volumes:
+  dpd-data:

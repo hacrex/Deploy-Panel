@@ -1,0 +1,145 @@
+syntax = "proto3";
+
+package deploypanel.agent.v1;
+
+option go_package = "github.com/OWNER/deploypanel/gen/deploypanel/agent/v1;agentv1";
+
+// The agent is always the client. The control plane never dials a node.
+service AgentService {
+  // One-time enrollment with a short-lived token. Returns a client certificate.
+  rpc Enroll(EnrollRequest) returns (EnrollResponse);
+
+  // Long-lived bidirectional stream. Control plane sends Jobs, agent sends everything else.
+  rpc Connect(stream AgentMessage) returns (stream ControlMessage);
+}
+
+message EnrollRequest {
+  string token = 1;
+  string node_name = 2;
+  bytes csr_pem = 3;
+  NodeInfo info = 4;
+}
+
+message EnrollResponse {
+  string node_id = 1;
+  bytes client_cert_pem = 2;
+  bytes ca_pem = 3;
+  bytes job_signing_pubkey = 4;   // agents verify job signatures with this key
+}
+
+message NodeInfo {
+  string arch = 1;
+  int64 cpu_milli = 2;
+  int64 mem_mb = 3;
+  int64 disk_mb = 4;
+  string agent_version = 5;
+  string docker_version = 6;
+}
+
+// ---- agent to control plane
+message AgentMessage {
+  oneof body {
+    Heartbeat heartbeat = 1;
+    JobAck job_ack = 2;
+    JobResult job_result = 3;
+    Event event = 4;
+    LogBatch logs = 5;
+    StatsBatch stats = 6;
+    Incident incident = 7;
+    ObservedState observed = 8;
+  }
+}
+
+message Heartbeat {
+  int64 unix_ms = 1;
+  NodeInfo info = 2;
+}
+
+message JobAck { string job_id = 1; }
+
+message JobResult {
+  string job_id = 1;
+  bool ok = 2;
+  string error = 3;
+  bytes detail_json = 4;
+}
+
+message Event {
+  string site_id = 1;
+  string container = 2;
+  string kind = 3;       // start, stop, die, oom, health_status, restart
+  int64 unix_ms = 4;
+  map<string, string> attrs = 5;
+}
+
+message LogLine {
+  int64 unix_ns = 1;
+  string stream = 2;     // stdout | stderr
+  string line = 3;
+}
+
+message LogBatch {
+  string site_id = 1;
+  string container = 2;
+  repeated LogLine lines = 3;
+}
+
+message StatsSample {
+  int64 unix_s = 1;
+  int64 cpu_milli = 2;
+  int64 mem_bytes = 3;
+  int64 net_rx = 4;
+  int64 net_tx = 5;
+  int64 blk_r = 6;
+  int64 blk_w = 7;
+}
+
+message StatsBatch {
+  string site_id = 1;
+  string container = 2;
+  repeated StatsSample samples = 3;
+}
+
+// Crash snapshot captured when a container exits abnormally.
+message Incident {
+  string site_id = 1;
+  string container = 2;
+  string kind = 3;       // crash | oom | unhealthy | restart_loop
+  int32 exit_code = 4;
+  bool oom_killed = 5;
+  int32 restart_count = 6;
+  repeated LogLine last_logs = 7;
+  repeated StatsSample last_stats = 8;
+  int64 unix_ms = 9;
+}
+
+message ObservedState {
+  message SiteState {
+    string site_id = 1;
+    int64 spec_revision = 2;
+    string state = 3;    // running, stopped, degraded, failed
+    string detail = 4;
+  }
+  repeated SiteState sites = 1;
+}
+
+// ---- control plane to agent
+message ControlMessage {
+  oneof body {
+    Job job = 1;
+    Ping ping = 2;
+  }
+}
+
+message Ping { int64 unix_ms = 1; }
+
+// Jobs are idempotent, carry a revision, and are signed by the control plane.
+message Job {
+  string job_id = 1;
+  string type = 2;               // site.apply, site.remove, site.exec, build.run, backup.run, restore.run, proxy.sync
+  string site_id = 3;
+  int64 revision = 4;
+  bytes payload_json = 5;
+  int64 expires_unix_ms = 6;
+  bytes signature = 7;           // over job_id, type, site_id, revision, payload, expires
+}
