@@ -5,7 +5,7 @@
 # dpd uses the mattn/go-sqlite3 driver, which needs CGO, so the final image is
 # a glibc base (distroless/base), not distroless/static.
 
-FROM golang:1.24-bookworm AS build
+FROM golang:1.25-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
