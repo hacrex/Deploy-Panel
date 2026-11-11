@@ -5,7 +5,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,7 +16,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/OWNER/deploypanel/internal/api"
 	"github.com/OWNER/deploypanel/internal/config"
+	"github.com/OWNER/deploypanel/internal/core/iam"
 	"github.com/OWNER/deploypanel/internal/store"
 )
 
@@ -65,18 +66,12 @@ func main() {
 		log.Printf("applied migrations: %v", applied)
 	}
 
+	svc := iam.New(iam.NewDBStore(db), cfg.LoginMaxAttempts, cfg.LoginLockoutFor).
+		WithSessionLifetime(cfg.SessionLifetime)
+	apiSrv := api.New(svc, &cfg)
+
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		pingCtx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
-		defer cancel()
-		status, code := "ok", http.StatusOK
-		if err := db.PingContext(pingCtx); err != nil {
-			status, code = "database unavailable", http.StatusServiceUnavailable
-		}
-		w.WriteHeader(code)
-		_ = json.NewEncoder(w).Encode(map[string]string{"status": status, "version": version})
-	})
+	mux.Handle("/", apiSrv.Handler())
 
 	srv := &http.Server{Addr: cfg.Listen, Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {

@@ -15,6 +15,10 @@ Status: scaffold. Docs and data model are drafted, code is a skeleton.
 4. [docs/MODULES.md](docs/MODULES.md): core vs optional modules, interfaces, events
 5. [docs/ROADMAP.md](docs/ROADMAP.md): milestones and the first four weeks
    [docs/CONFIG.md](docs/CONFIG.md): every `DP_*` setting, key handling, file locations
+   [docs/THREAT_MODEL.md](docs/THREAT_MODEL.md): assets, trust boundaries and threat catalog
+   [docs/TEMPLATE_SPEC.md](docs/TEMPLATE_SPEC.md): site template catalog and unified spec
+   [docs/API_CONVENTIONS.md](docs/API_CONVENTIONS.md): REST API conventions (auth, errors, pagination)
+   [docs/TESTING.md](docs/TESTING.md): test layers, CI and local smoke test
 6. [docs/adr/](docs/adr/): decisions, all currently Proposed
 
 ## Layout

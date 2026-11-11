@@ -26,6 +26,15 @@ type Config struct {
 	LogLevel          string
 	LogTTL            time.Duration
 	MetricTTL         time.Duration
+
+	// Session cookie
+	SessionCookieName string        // default "dp_session"
+	SessionLifetime   time.Duration // default 24h
+	SessionInsecure   bool          // allow non-Secure/SameSite=Lax cookies on loopback (dev only)
+
+	// Login rate limiting: max failed attempts per LoginLockoutFor window per (email, ip).
+	LoginMaxAttempts int
+	LoginLockoutFor  time.Duration
 }
 
 func Default() Config {
@@ -37,6 +46,13 @@ func Default() Config {
 		LogLevel:    "info",
 		LogTTL:      7 * 24 * time.Hour,
 		MetricTTL:   30 * 24 * time.Hour,
+
+		SessionCookieName: "dp_session",
+		SessionLifetime:   24 * time.Hour,
+		SessionInsecure:   false,
+
+		LoginMaxAttempts: 5,
+		LoginLockoutFor:  15 * time.Minute,
 	}
 }
 
@@ -59,6 +75,40 @@ func FromEnv(getenv func(string) string) (Config, error) {
 	str("DP_DB_PATH", &c.DBPath)
 	str("DP_SECRET_KEY_FILE", &c.SecretKeyFile)
 	str("DP_LOG_LEVEL", &c.LogLevel)
+	str("DP_SESSION_COOKIE_NAME", &c.SessionCookieName)
+	if v := getenv("DP_SESSION_LIFETIME"); v != "" {
+		d, err := ParseDuration(v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("DP_SESSION_LIFETIME: %w", err))
+		} else {
+			c.SessionLifetime = d
+		}
+	}
+	if v := getenv("DP_SESSION_INSECURE"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("DP_SESSION_INSECURE: %w", err))
+		}
+		c.SessionInsecure = b
+	}
+	if v := getenv("DP_LOGIN_MAX_ATTEMPTS"); v != "" {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("DP_LOGIN_MAX_ATTEMPTS: %w", err))
+		} else if n < 1 {
+			errs = append(errs, errors.New("DP_LOGIN_MAX_ATTEMPTS must be at least 1"))
+		} else {
+			c.LoginMaxAttempts = n
+		}
+	}
+	if v := getenv("DP_LOGIN_LOCKOUT_FOR"); v != "" {
+		d, err := ParseDuration(v)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("DP_LOGIN_LOCKOUT_FOR: %w", err))
+		} else {
+			c.LoginLockoutFor = d
+		}
+	}
 
 	if v := getenv("DP_ALLOW_PUBLIC_LISTEN"); v != "" {
 		b, err := strconv.ParseBool(v)
@@ -131,6 +181,18 @@ func (c Config) Validate() error {
 	}
 	if c.MetricTTL <= 0 {
 		errs = append(errs, errors.New("DP_METRIC_TTL must be positive"))
+	}
+	if c.SessionCookieName == "" {
+		errs = append(errs, errors.New("DP_SESSION_COOKIE_NAME must not be empty"))
+	}
+	if c.SessionLifetime <= 0 {
+		errs = append(errs, errors.New("DP_SESSION_LIFETIME must be positive"))
+	}
+	if c.LoginMaxAttempts < 1 {
+		errs = append(errs, errors.New("DP_LOGIN_MAX_ATTEMPTS must be at least 1"))
+	}
+	if c.LoginLockoutFor <= 0 {
+		errs = append(errs, errors.New("DP_LOGIN_LOCKOUT_FOR must be positive"))
 	}
 	return errors.Join(errs...)
 }
