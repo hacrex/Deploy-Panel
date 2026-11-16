@@ -1,7 +1,7 @@
 VERSION ?= 0.0.0-dev
 LDFLAGS := -s -w -X main.version=$(VERSION)
 
-.PHONY: build test vet fmt-check schema-check api-check proto-lint proto docker ci clean
+.PHONY: build test vet fmt-check schema-check api-check proto-lint proto docker website ci clean
 
 # dpd needs CGO (mattn/go-sqlite3). dp-agent and dpctl do not.
 build:
@@ -37,6 +37,10 @@ proto:
 docker:
 	docker build -f deploy/docker/Dockerfile.dpd -t deploypanel/dpd:dev .
 	docker build -f deploy/docker/Dockerfile.dp-agent -t deploypanel/dp-agent:dev .
+
+# Serves the marketing site without a build step.
+website:
+	python3 -m http.server 4173 --directory website
 
 ci: fmt-check vet test schema-check api-check
 
